@@ -1,0 +1,142 @@
+// Copyright (c) 2026, Maptek Pty Ltd
+// Licensed under the MIT License
+use std::sync::Arc;
+
+use crate::RendererResult;
+use crate::renderer::RendererInternal;
+
+use cobalt_renderer_sys as sys;
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateBufferDataType {
+    Null = sys::Cobalt_StateBufferDataType_Null as u32,
+    Boolean = sys::Cobalt_StateBufferDataType_Boolean as u32,
+    Int32 = sys::Cobalt_StateBufferDataType_Int32 as u32,
+    UInt32 = sys::Cobalt_StateBufferDataType_UInt32 as u32,
+    Float32 = sys::Cobalt_StateBufferDataType_Float32 as u32,
+    Float64 = sys::Cobalt_StateBufferDataType_Float64 as u32,
+}
+
+pub struct StateBufferLayoutBuilder {
+    state_buffer: StateBufferLayout,
+}
+
+impl StateBufferLayoutBuilder {
+    pub(crate) fn new(
+        handle: sys::Cobalt_StateBufferLayout,
+        renderer_internal: Arc<RendererInternal>,
+    ) -> Self {
+        let builder = StateBufferLayoutBuilder {
+            state_buffer: StateBufferLayout::new(handle, renderer_internal),
+        };
+        unsafe {
+            if sys::Cobalt_StateBufferLayout_BeginLayoutDefinition(builder.state_buffer.handle)
+                != sys::COBALT_SUCCESS
+            {
+                // BeginLayoutDefinition should only fail because a layout was already started
+                // or completed. As it should be new here, this should not fail and a failure
+                // would indicate a deeper unexpected issue
+                panic!("StateBufferLayout BeginLayoutDefinition failed unexpectedly");
+            }
+        }
+        builder
+    }
+
+    pub fn append_field(
+        &mut self,
+        name: impl AsRef<str>,
+        data_type: StateBufferDataType,
+        array_size: usize,
+    ) {
+        let name = name.as_ref();
+        unsafe {
+            sys::Cobalt_StateBufferLayout_AppendField(
+                self.state_buffer.handle,
+                name.as_ptr() as *const std::ffi::c_char,
+                name.len(),
+                data_type as sys::Cobalt_StateBufferDataType,
+                array_size,
+            )
+        }
+    }
+
+    pub fn append_vector(
+        &mut self,
+        name: impl AsRef<str>,
+        data_type: StateBufferDataType,
+        element_count: usize,
+        array_size: usize,
+    ) {
+        let name = name.as_ref();
+        unsafe {
+            sys::Cobalt_StateBufferLayout_AppendVector(
+                self.state_buffer.handle,
+                name.as_ptr() as *const std::ffi::c_char,
+                name.len(),
+                data_type as sys::Cobalt_StateBufferDataType,
+                element_count,
+                array_size,
+            )
+        }
+    }
+
+    pub fn append_matrix(
+        &mut self,
+        name: impl AsRef<str>,
+        data_type: StateBufferDataType,
+        width: usize,
+        height: usize,
+        array_size: usize,
+    ) {
+        let name = name.as_ref();
+        unsafe {
+            sys::Cobalt_StateBufferLayout_AppendMatrix(
+                self.state_buffer.handle,
+                name.as_ptr() as *const std::ffi::c_char,
+                name.len(),
+                data_type as sys::Cobalt_StateBufferDataType,
+                width,
+                height,
+                array_size,
+            )
+        }
+    }
+
+    pub fn construct(self) -> RendererResult<StateBufferLayout> {
+        unsafe {
+            return_on_failure!(sys::Cobalt_StateBufferLayout_ConstructStateLayout(
+                self.state_buffer.handle,
+            ))
+        }
+        Ok(self.state_buffer)
+    }
+}
+
+pub struct StateBufferLayout {
+    pub(crate) handle: sys::Cobalt_StateBufferLayout,
+    _renderer: Arc<RendererInternal>,
+}
+
+impl StateBufferLayout {
+    pub(crate) fn new(
+        handle: sys::Cobalt_StateBufferLayout,
+        renderer_internal: Arc<RendererInternal>,
+    ) -> Self {
+        StateBufferLayout {
+            handle,
+            _renderer: renderer_internal,
+        }
+    }
+}
+
+impl Drop for StateBufferLayout {
+    fn drop(&mut self) {
+        unsafe {
+            sys::Cobalt_StateBufferLayout_Delete(self.handle);
+        }
+    }
+}
+
+unsafe impl Send for StateBufferLayout {}
+unsafe impl Sync for StateBufferLayout {}

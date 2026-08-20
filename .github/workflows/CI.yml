@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'cobalt_renderer_sys/README.md'
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'cobalt_renderer_sys/README.md'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Cancel any previously running instance of this workflow when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-latest
+            buildPlatform: windows 
+            buildArchitecture: x64 
+            buildToolset: msvc
+          - name: macOS ARM64
+            runner: macos-latest
+            buildPlatform: macos 
+            buildArchitecture: arm64 
+            buildToolset: clang
+          - name: Ubuntu x64
+            runner: ubuntu-latest
+            buildPlatform: ubuntu 
+            buildArchitecture: x64 
+            buildToolset: gcc
+          - name: Ubuntu ARM64
+            runner: ubuntu-26.04-arm
+            buildPlatform: ubuntu 
+            buildArchitecture: arm64 
+            buildToolset: gcc
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Installing dependencies (windows)
+        if: ${{ matrix.buildPlatform == 'windows' }}
+        uses: ./.github/actions/install-deps-windows
+        with:
+          build-architecture: ${{ matrix.buildArchitecture }}
+          build-toolset: ${{ matrix.buildToolset }}
+
+      - name: Installing dependencies (linux)
+        if: ${{ matrix.buildPlatform == 'ubuntu' }}
+        uses: ./.github/actions/install-deps-ubuntu
+
+      - name: Installing dependencies (macos)
+        if: ${{ matrix.buildPlatform == 'macos' }}
+        uses: ./.github/actions/install-deps-macos
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check documentation
+        env:
+          DOCS_RS: 1
+          RUSTDOCFLAGS: -D warnings
+        run:
+          cargo doc --no-deps
+
+      - name: Build and Test (download_sdk)
+        run: |
+          cargo clean
+          cargo build --features download_sdk
+          cargo clippy --all-targets --features download_sdk -- -D warnings
+          cargo test --no-fail-fast --all-targets --features download_sdk -- --show-output
+
+      # Building the SDK is time consuming, but it should be enabled in some form in the future
+
+      # - name: Build and Test (build_sdk,generate_bindings)
+      #   env:
+      #     COBALT_CACHE_SDK_DIR: ./CobaltSDKBuild
+      #   run: |
+      #     cargo clean
+      #     cargo build --features build_sdk,generate_bindings
+      #     cargo clippy --all-targets --features build_sdk,generate_bindings -- -D warnings
+      #     cargo test --no-fail-fast --all-targets --features build_sdk,generate_bindings -- --show-output
+
+      # Currently substitute the above with downloading the SDK but generating bindings
+      - name: Build and Test (download_sdk,generate_bindings)
+        run: |
+          cargo clean
+          cargo build --features download_sdk,generate_bindings
+          cargo clippy --all-targets --features download_sdk,generate_bindings -- -D warnings
+          cargo test --no-fail-fast --all-targets --features download_sdk,generate_bindings -- --show-output

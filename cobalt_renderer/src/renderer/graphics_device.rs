@@ -1,0 +1,691 @@
+// Copyright (c) 2026, Maptek Pty Ltd
+// Licensed under the MIT License
+#[cfg(feature = "raw_window_handle")]
+use raw_window_handle::RawDisplayHandle;
+
+use super::GraphicsDeviceEnumerator;
+use crate::renderer::{Renderer, RendererInitializationFlags, RendererOption};
+use crate::resources::textures;
+use crate::{RendererError, RendererErrorKind, RendererResult};
+
+use cobalt_renderer_sys as sys;
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeviceType {
+    Discrete = sys::Cobalt_DeviceType_Discrete as u32,
+    Integrated = sys::Cobalt_DeviceType_Integrated as u32,
+    Software = sys::Cobalt_DeviceType_Software as u32,
+    Unknown = sys::Cobalt_DeviceType_Unknown as u32,
+}
+
+impl From<sys::Cobalt_DeviceType> for DeviceType {
+    fn from(value: sys::Cobalt_DeviceType) -> Self {
+        match value {
+            sys::Cobalt_DeviceType_Discrete => Self::Discrete,
+            sys::Cobalt_DeviceType_Integrated => Self::Integrated,
+            sys::Cobalt_DeviceType_Software => Self::Software,
+            sys::Cobalt_DeviceType_Unknown => Self::Unknown,
+            v => panic!("Encountered unknown DeviceType value '{v}'"),
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemoryType {
+    Dedicated = sys::Cobalt_MemoryType_Dedicated as u32,
+    Shared = sys::Cobalt_MemoryType_Shared as u32,
+}
+
+impl From<sys::Cobalt_MemoryType> for MemoryType {
+    fn from(value: sys::Cobalt_MemoryType) -> Self {
+        match value {
+            sys::Cobalt_MemoryType_Dedicated => Self::Dedicated,
+            sys::Cobalt_MemoryType_Shared => Self::Shared,
+            v => panic!("Encountered unknown MemoryType value '{v}'"),
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Feature {
+    AnisotropicFiltering = sys::Cobalt_Feature_AnisotropicFiltering as u32,
+    GeometryShaders = sys::Cobalt_Feature_GeometryShaders as u32,
+    ComputeShaders = sys::Cobalt_Feature_ComputeShaders as u32,
+    MeshShaders = sys::Cobalt_Feature_MeshShaders as u32,
+    DepthBiasClamp = sys::Cobalt_Feature_DepthBiasClamp as u32,
+    IndirectDraw = sys::Cobalt_Feature_IndirectDraw as u32,
+    IndirectMultiDrawNative = sys::Cobalt_Feature_IndirectMultiDrawNative as u32,
+    InstanceOffset = sys::Cobalt_Feature_InstanceOffset as u32,
+    PolygonWireframeFillMode = sys::Cobalt_Feature_PolygonWireframeFillMode as u32,
+    ResourceArrays = sys::Cobalt_Feature_ResourceArrays as u32,
+    ShaderArraysOfArrays = sys::Cobalt_Feature_ShaderArraysOfArrays as u32,
+    SeparateBlendModePerTarget = sys::Cobalt_Feature_SeparateBlendModePerTarget as u32,
+    SeparateTextureSamplers = sys::Cobalt_Feature_SeparateTextureSamplers as u32,
+    TextureCubeArray = sys::Cobalt_Feature_TextureCubeArray as u32,
+    MipmapLevelBias = sys::Cobalt_Feature_MipmapLevelBias as u32,
+}
+
+impl From<sys::Cobalt_Feature> for Feature {
+    fn from(value: sys::Cobalt_Feature) -> Self {
+        match value {
+            sys::Cobalt_Feature_AnisotropicFiltering => Self::AnisotropicFiltering,
+            sys::Cobalt_Feature_GeometryShaders => Self::GeometryShaders,
+            sys::Cobalt_Feature_ComputeShaders => Self::ComputeShaders,
+            sys::Cobalt_Feature_MeshShaders => Self::MeshShaders,
+            sys::Cobalt_Feature_DepthBiasClamp => Self::DepthBiasClamp,
+            sys::Cobalt_Feature_IndirectDraw => Self::IndirectDraw,
+            sys::Cobalt_Feature_IndirectMultiDrawNative => Self::IndirectMultiDrawNative,
+            sys::Cobalt_Feature_InstanceOffset => Self::InstanceOffset,
+            sys::Cobalt_Feature_PolygonWireframeFillMode => Self::PolygonWireframeFillMode,
+            sys::Cobalt_Feature_ResourceArrays => Self::ResourceArrays,
+            sys::Cobalt_Feature_ShaderArraysOfArrays => Self::ShaderArraysOfArrays,
+            sys::Cobalt_Feature_SeparateBlendModePerTarget => Self::SeparateBlendModePerTarget,
+            sys::Cobalt_Feature_SeparateTextureSamplers => Self::SeparateTextureSamplers,
+            sys::Cobalt_Feature_TextureCubeArray => Self::TextureCubeArray,
+            sys::Cobalt_Feature_MipmapLevelBias => Self::MipmapLevelBias,
+            v => panic!("Encountered unknown Feature value '{v}'"),
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DepthRange {
+    #[default]
+    ZeroToOne = sys::Cobalt_DepthRange_ZeroToOne as u32,
+    NegativeOneToOne = sys::Cobalt_DepthRange_NegativeOneToOne as u32,
+}
+
+impl From<sys::Cobalt_DepthRange> for DepthRange {
+    fn from(value: sys::Cobalt_DepthRange) -> Self {
+        match value {
+            sys::Cobalt_DepthRange_ZeroToOne => Self::ZeroToOne,
+            sys::Cobalt_DepthRange_NegativeOneToOne => Self::NegativeOneToOne,
+            v => panic!("Encountered unknown DepthRange value '{v}'"),
+        }
+    }
+}
+
+/// Manufacturer of graphics device
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Vendor {
+    Apple = sys::Cobalt_Vendor_Apple as u32,
+    Amd = sys::Cobalt_Vendor_AMD as u32,
+    ImgTec = sys::Cobalt_Vendor_ImgTec as u32,
+    Nvidia = sys::Cobalt_Vendor_Nvidia as u32,
+    Arm = sys::Cobalt_Vendor_ARM as u32,
+    Microsoft = sys::Cobalt_Vendor_Microsoft as u32,
+    Qualcomm = sys::Cobalt_Vendor_Qualcomm as u32,
+    Intel = sys::Cobalt_Vendor_Intel as u32,
+    Mesa = sys::Cobalt_Vendor_Mesa as u32,
+    Vivante = sys::Cobalt_Vendor_Vivante as u32,
+    VeriSilicon = sys::Cobalt_Vendor_VeriSilicon as u32,
+    Unknown = sys::Cobalt_Vendor_Unknown as u32,
+}
+
+impl From<sys::Cobalt_Vendor> for Vendor {
+    fn from(value: sys::Cobalt_Vendor) -> Self {
+        match value {
+            sys::Cobalt_Vendor_Apple => Self::Apple,
+            sys::Cobalt_Vendor_AMD => Self::Amd,
+            sys::Cobalt_Vendor_ImgTec => Self::ImgTec,
+            sys::Cobalt_Vendor_Nvidia => Self::Nvidia,
+            sys::Cobalt_Vendor_ARM => Self::Arm,
+            sys::Cobalt_Vendor_Microsoft => Self::Microsoft,
+            sys::Cobalt_Vendor_Qualcomm => Self::Qualcomm,
+            sys::Cobalt_Vendor_Intel => Self::Intel,
+            sys::Cobalt_Vendor_Mesa => Self::Mesa,
+            sys::Cobalt_Vendor_Vivante => Self::Vivante,
+            sys::Cobalt_Vendor_VeriSilicon => Self::VeriSilicon,
+            sys::Cobalt_Vendor_Unknown => Self::Unknown,
+            v => panic!("Encountered unknown Vendor value '{v}'"),
+        }
+    }
+}
+
+/// Reported image size and dimension limits for graphics device
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct ImageLimits {
+    pub max_image_dimension_texture_1d: u32,
+    pub max_image_dimension_texture_2d: u32,
+    pub max_image_dimension_texture_3d: u32,
+    pub max_image_dimension_texture_cube: u32,
+    pub max_image_array_size_texture_1d: u32,
+    pub max_image_array_size_texture_2d: u32,
+    pub max_sampler_anisotropic_filtering_level: i32,
+}
+
+/// Reported limits in shaders for graphics device
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct ShaderLimits {
+    pub max_vertex_shader_input_attributes: u32,
+    pub max_vertex_shader_output_components: u32,
+    pub max_geometry_shader_input_components: u32,
+    pub max_geometry_shader_output_components: u32,
+    pub max_geometry_shader_output_vertices: u32,
+    pub max_geometry_shader_total_output_components: u32,
+    pub max_fragment_shader_input_components: u32,
+}
+
+/// Reported limits for renderables for graphics device
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct DrawLimits {
+    pub max_vertex_count_per_draw: u32,
+    pub max_index_value: u32,
+    pub max_texture_resources_per_draw: u32,
+    pub max_resources_per_draw: u32,
+}
+
+/// Reported limits for frame buffers for graphics device
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct FrameBufferLimits {
+    pub max_frame_buffer_width: u32,
+    pub max_frame_buffer_height: u32,
+    pub max_frame_buffer_color_attachments: u32,
+    pub depth_range: DepthRange,
+}
+
+/// Reported limits for state buffers for graphics device
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct DataBufferLimits {
+    pub max_state_buffer_page_size: u32,
+    pub state_buffer_alignment_float_or_int: u32,
+    pub state_buffer_alignment_vector_4f: u32,
+    pub state_buffer_alignment_matrix_4f: u32,
+    pub state_buffer_alignment_array_whole: u32,
+    pub state_buffer_alignment_array_stride: u32,
+    pub state_buffer_alignment_struct: u32,
+}
+
+// Internal enum of window systems, holds onto unsafe pointers
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowSystemInternal {
+    Headless,
+    #[cfg(target_os = "windows")]
+    Windows,
+    #[cfg(target_os = "macos")]
+    AppKit,
+    #[cfg(target_os = "linux")]
+    Wayland {
+        display: std::ptr::NonNull<std::ffi::c_void>,
+    },
+    #[cfg(target_os = "linux")]
+    Xcb {
+        connection: std::ptr::NonNull<std::ffi::c_void>,
+    },
+    #[cfg(target_os = "linux")]
+    Xlib {
+        display: std::ptr::NonNull<std::ffi::c_void>,
+    },
+}
+
+/// Window system that will be used for the renderer
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowSystem {
+    internal: WindowSystemInternal,
+}
+
+impl WindowSystem {
+    /// # Safety
+    ///
+    /// Display handles must be valid when `WindowSystem` is used to create a renderer
+    #[cfg(feature = "raw_window_handle")]
+    pub unsafe fn new_from_raw_display_handle(
+        handle: raw_window_handle::RawDisplayHandle,
+    ) -> RendererResult<Self> {
+        let internal = match handle {
+            #[cfg(target_os = "windows")]
+            RawDisplayHandle::Windows(_) => Ok(WindowSystemInternal::Windows),
+            #[cfg(target_os = "macos")]
+            RawDisplayHandle::AppKit(_) => Ok(WindowSystemInternal::AppKit),
+            #[cfg(target_os = "linux")]
+            RawDisplayHandle::Wayland(w) => {
+                Ok(WindowSystemInternal::Wayland { display: w.display })
+            }
+            #[cfg(target_os = "linux")]
+            RawDisplayHandle::Xcb(w) => {
+                let connection = w.connection.ok_or_else(|| {
+                    RendererError::new_with_error(
+                        RendererErrorKind::UnsupportedWindow,
+                        "Xcb display does not contain a required connection pointer".into(),
+                    )
+                })?;
+                Ok(WindowSystemInternal::Xcb { connection })
+            }
+            #[cfg(target_os = "linux")]
+            RawDisplayHandle::Xlib(w) => {
+                let display = w.display.ok_or_else(|| {
+                    RendererError::new_with_error(
+                        RendererErrorKind::UnsupportedWindow,
+                        "Xlib display does not contain a required display pointer".into(),
+                    )
+                })?;
+                Ok(WindowSystemInternal::Xlib { display })
+            }
+            _ => Err(RendererError::new_with_error(
+                RendererErrorKind::UnsupportedWindow,
+                "RawDisplayHandle variant is not supported on this platform".into(),
+            )),
+        }?;
+        Ok(WindowSystem { internal })
+    }
+
+    pub fn headless() -> Self {
+        WindowSystem {
+            internal: WindowSystemInternal::Headless,
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn windows() -> Self {
+        WindowSystem {
+            internal: WindowSystemInternal::Windows,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn app_kit() -> Self {
+        WindowSystem {
+            internal: WindowSystemInternal::AppKit,
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Display pointer must point to a valid Wayland `wl_display` which is valid when
+    /// `WindowSystem` is used to create a renderer
+    #[cfg(target_os = "linux")]
+    pub unsafe fn wayland(display: std::ptr::NonNull<std::ffi::c_void>) -> Self {
+        WindowSystem {
+            internal: WindowSystemInternal::Wayland { display },
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Connection pointer must point to a valid Xcb `xcb_connection_t` which is valid when
+    /// `WindowSystem` is used to create a renderer
+    #[cfg(target_os = "linux")]
+    pub unsafe fn xcb(connection: std::ptr::NonNull<std::ffi::c_void>) -> Self {
+        WindowSystem {
+            internal: WindowSystemInternal::Xcb { connection },
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Display pointer must point to a valid Xlib `Display` which is valid when
+    /// `WindowSystem` is used to create a renderer
+    #[cfg(target_os = "linux")]
+    pub unsafe fn xlib(display: std::ptr::NonNull<std::ffi::c_void>) -> Self {
+        WindowSystem {
+            internal: WindowSystemInternal::Xlib { display },
+        }
+    }
+}
+
+/// Graphics device for rendering, allows for interrogating
+/// available features and limits, and creating a [`Renderer`](crate::renderer::Renderer)
+pub struct GraphicsDevice<'a> {
+    pub(crate) handle: sys::Cobalt_GraphicsDevice,
+    enumerator: &'a GraphicsDeviceEnumerator,
+}
+
+impl<'a> GraphicsDevice<'a> {
+    pub(crate) fn new(
+        handle: sys::Cobalt_GraphicsDevice,
+        enumerator: &'a GraphicsDeviceEnumerator,
+    ) -> Self {
+        GraphicsDevice { handle, enumerator }
+    }
+
+    pub fn device_type(&self) -> DeviceType {
+        let mut device_type = sys::Cobalt_DeviceType_Unknown;
+        unsafe {
+            sys::Cobalt_GraphicsDevice_GetDeviceType(self.handle, &mut device_type);
+        }
+        DeviceType::from(device_type)
+    }
+
+    pub fn vendor(&self) -> Vendor {
+        let mut vendor = sys::Cobalt_Vendor_Unknown;
+        unsafe {
+            sys::Cobalt_GraphicsDevice_GetVendor(self.handle, &mut vendor);
+        }
+        Vendor::from(vendor)
+    }
+
+    pub fn memory_size_in_bytes(&self, memory_type: MemoryType) -> usize {
+        unsafe {
+            sys::Cobalt_GraphicsDevice_GetMemorySizeInBytes(
+                self.handle,
+                memory_type as sys::Cobalt_MemoryType,
+            )
+        }
+    }
+
+    pub fn vendor_name(&self) -> String {
+        // We don't know the size of the string.
+        // Allocate what should be enough space and if it fills up
+        // we will fetch the name again but with enough space
+        let mut capacity: usize = 64;
+        loop {
+            let mut name: Vec<u8> = vec![0; capacity];
+            let mut length = name.len();
+            unsafe {
+                sys::Cobalt_GraphicsDevice_GetVendorName(
+                    self.handle,
+                    name.as_mut_ptr() as *mut std::ffi::c_char,
+                    &mut length,
+                );
+            }
+            if length > name.len() {
+                capacity = length;
+                continue;
+            }
+
+            name.truncate(length);
+            return String::from_utf8_lossy(name.as_slice()).to_string();
+        }
+    }
+
+    pub fn device_name(&self) -> String {
+        // We don't know the size of the string.
+        // Allocate what should be enough space and if it fills up
+        // we will fetch the name again but with enough space
+        let mut capacity: usize = 128;
+        loop {
+            let mut name: Vec<u8> = vec![0; capacity];
+            let mut length = name.len();
+            unsafe {
+                sys::Cobalt_GraphicsDevice_GetDeviceName(
+                    self.handle,
+                    name.as_mut_ptr() as *mut std::ffi::c_char,
+                    &mut length,
+                );
+            }
+            if length > name.len() {
+                capacity = length;
+                continue;
+            }
+
+            name.truncate(length);
+            return String::from_utf8_lossy(name.as_slice()).to_string();
+        }
+    }
+
+    pub fn driver_info(&self) -> String {
+        // We don't know the size of the string.
+        // Allocate what should be enough space and if it fills up
+        // we will fetch the name again but with enough space
+        let mut capacity: usize = 128;
+        loop {
+            let mut name: Vec<u8> = vec![0; capacity];
+            let mut length = name.len();
+            unsafe {
+                sys::Cobalt_GraphicsDevice_GetDriverInfo(
+                    self.handle,
+                    name.as_mut_ptr() as *mut std::ffi::c_char,
+                    &mut length,
+                );
+            }
+            if length > name.len() {
+                capacity = length;
+                continue;
+            }
+
+            name.truncate(length);
+            return String::from_utf8_lossy(name.as_slice()).to_string();
+        }
+    }
+
+    pub fn image_limits(&self) -> ImageLimits {
+        let mut limits = sys::Cobalt_ImageLimits::default();
+        unsafe {
+            sys::Cobalt_GraphicsDevice_GetImageLimits(self.handle, &mut limits);
+        }
+        ImageLimits {
+            max_image_dimension_texture_1d: limits.maxImageDimensionTexture1D,
+            max_image_dimension_texture_2d: limits.maxImageDimensionTexture2D,
+            max_image_dimension_texture_3d: limits.maxImageDimensionTexture3D,
+            max_image_array_size_texture_1d: limits.maxImageArraySizeTexture1D,
+            max_image_array_size_texture_2d: limits.maxImageArraySizeTexture2D,
+            max_image_dimension_texture_cube: limits.maxImageDimensionTextureCube,
+            max_sampler_anisotropic_filtering_level: limits.maxSamplerAnisotropicFilteringLevel,
+        }
+    }
+
+    pub fn shader_limits(&self) -> ShaderLimits {
+        let mut limits = sys::Cobalt_ShaderLimits::default();
+        unsafe {
+            sys::Cobalt_GraphicsDevice_GetShaderLimits(self.handle, &mut limits);
+        }
+        ShaderLimits {
+            max_vertex_shader_input_attributes: limits.maxVertexShaderInputAttributes,
+            max_vertex_shader_output_components: limits.maxVertexShaderOutputComponents,
+            max_geometry_shader_input_components: limits.maxGeometryShaderInputComponents,
+            max_geometry_shader_output_components: limits.maxGeometryShaderOutputComponents,
+            max_geometry_shader_output_vertices: limits.maxGeometryShaderOutputVertices,
+            max_geometry_shader_total_output_components: limits
+                .maxGeometryShaderTotalOutputComponents,
+            max_fragment_shader_input_components: limits.maxFragmentShaderInputComponents,
+        }
+    }
+
+    pub fn draw_limits(&self) -> DrawLimits {
+        let mut limits = sys::Cobalt_DrawLimits::default();
+        unsafe {
+            sys::Cobalt_GraphicsDevice_GetDrawLimits(self.handle, &mut limits);
+        }
+        DrawLimits {
+            max_vertex_count_per_draw: limits.maxVertexCountPerDraw,
+            max_index_value: limits.maxIndexValue,
+            max_texture_resources_per_draw: limits.maxTextureResourcesPerDraw,
+            max_resources_per_draw: limits.maxResourcesPerDraw,
+        }
+    }
+
+    pub fn draw_frame_buffer_limits(&self) -> FrameBufferLimits {
+        let mut limits = sys::Cobalt_FrameBufferLimits::default();
+        unsafe {
+            sys::Cobalt_GraphicsDevice_GetFrameBufferLimits(self.handle, &mut limits);
+        }
+        FrameBufferLimits {
+            max_frame_buffer_width: limits.maxFrameBufferWidth,
+            max_frame_buffer_height: limits.maxFrameBufferHeight,
+            max_frame_buffer_color_attachments: limits.maxFrameBufferColorAttachments,
+            depth_range: DepthRange::from(limits.depthRange),
+        }
+    }
+
+    pub fn draw_data_buffer_limits(&self) -> DataBufferLimits {
+        let mut limits = sys::Cobalt_DataBufferLimits::default();
+        unsafe {
+            sys::Cobalt_GraphicsDevice_GetDataBufferLimits(self.handle, &mut limits);
+        }
+        DataBufferLimits {
+            max_state_buffer_page_size: limits.maxStateBufferPageSize,
+            state_buffer_alignment_float_or_int: limits.stateBufferAlignmentFloatOrInt,
+            state_buffer_alignment_vector_4f: limits.stateBufferAlignmentVector4f,
+            state_buffer_alignment_matrix_4f: limits.stateBufferAlignmentMatrix4f,
+            state_buffer_alignment_array_whole: limits.stateBufferAlignmentArrayWhole,
+            state_buffer_alignment_array_stride: limits.stateBufferAlignmentArrayStride,
+            state_buffer_alignment_struct: limits.stateBufferAlignmentStruct,
+        }
+    }
+
+    pub fn is_feature_supported(&self, feature: Feature) -> bool {
+        unsafe {
+            sys::Cobalt_GraphicsDevice_IsFeatureSupported(
+                self.handle,
+                feature as sys::Cobalt_Feature,
+            ) != 0
+        }
+    }
+
+    pub fn are_all_features_supported(&self, feature_set: &[Feature]) -> bool {
+        unsafe {
+            sys::Cobalt_GraphicsDevice_AreAllFeaturesSupported(
+                self.handle,
+                feature_set.as_ptr() as *const sys::Cobalt_Feature,
+                feature_set.len(),
+            ) != 0
+        }
+    }
+
+    pub fn all_supported_features(&self) -> Vec<Feature> {
+        // In theory, we know the maximum number of features available
+        // as long as the `Feature` enum stays in sync, we could even use
+        // std::mem::variant_count (https://doc.rust-lang.org/std/mem/fn.variant_count.html)
+        // But for now we will allocate space and resize if needed
+        // like we do for `device_name`
+        let mut capacity = 16;
+        loop {
+            let mut features: Vec<sys::Cobalt_Feature> = vec![0; capacity];
+            let mut length = features.len();
+            unsafe {
+                sys::Cobalt_GraphicsDevice_GetAllSupportedFeatures(
+                    self.handle,
+                    features.as_mut_ptr(),
+                    &mut length,
+                );
+            }
+            if length > features.len() {
+                capacity = length;
+                continue;
+            }
+
+            features.truncate(length);
+            return features.into_iter().map(Feature::from).collect();
+        }
+    }
+
+    pub fn is_texture_format_supported(
+        &self,
+        image_format: textures::ImageFormat,
+        data_format: textures::DataFormat,
+    ) -> bool {
+        unsafe {
+            sys::Cobalt_GraphicsDevice_IsTextureFormatSupported(
+                self.handle,
+                image_format as sys::Cobalt_ImageFormat,
+                data_format as sys::Cobalt_DataFormat,
+            ) != 0
+        }
+    }
+
+    pub fn create_renderer(
+        &mut self,
+        enabled_features: &[Feature],
+        enabled_options: &[RendererOption],
+        init_flags: RendererInitializationFlags,
+        window_system: WindowSystem,
+    ) -> RendererResult<Renderer> {
+        let mut renderer = std::ptr::null_mut();
+        unsafe {
+            return_on_failure!(sys::Cobalt_GraphicsDevice_CreateRenderer(
+                self.handle,
+                enabled_features.as_ptr() as *const sys::Cobalt_Feature,
+                enabled_features.len(),
+                enabled_options.as_ptr() as *const sys::Cobalt_RendererOption,
+                enabled_options.len(),
+                &mut renderer,
+            ));
+            let result = match window_system.internal {
+                WindowSystemInternal::Headless => {
+                    let info = sys::Cobalt_WindowSystemInfoHeadless {
+                        base: sys::Cobalt_WindowSystemInfoBase {
+                            type_: sys::Cobalt_WindowSystemType_Headless,
+                        },
+                    };
+                    sys::Cobalt_Renderer_Initialize(
+                        renderer,
+                        (&raw const info) as *const sys::Cobalt_WindowSystemInfoBase,
+                        init_flags.bits() as sys::Cobalt_RendererInitializationFlags,
+                    )
+                }
+                #[cfg(target_os = "windows")]
+                WindowSystemInternal::Windows => {
+                    let info = sys::Cobalt_WindowSystemInfoWin32 {
+                        base: sys::Cobalt_WindowSystemInfoBase {
+                            type_: sys::Cobalt_WindowSystemType_Win32,
+                        },
+                    };
+                    sys::Cobalt_Renderer_Initialize(
+                        renderer,
+                        (&raw const info) as *const sys::Cobalt_WindowSystemInfoBase,
+                        init_flags.bits() as sys::Cobalt_RendererInitializationFlags,
+                    )
+                }
+                #[cfg(target_os = "macos")]
+                WindowSystemInternal::AppKit => {
+                    let info = sys::Cobalt_WindowSystemInfoAppKit {
+                        base: sys::Cobalt_WindowSystemInfoBase {
+                            type_: sys::Cobalt_WindowSystemType_AppKit,
+                        },
+                    };
+                    sys::Cobalt_Renderer_Initialize(
+                        renderer,
+                        (&raw const info) as *const sys::Cobalt_WindowSystemInfoBase,
+                        init_flags.bits() as sys::Cobalt_RendererInitializationFlags,
+                    )
+                }
+                #[cfg(target_os = "linux")]
+                WindowSystemInternal::Wayland { display } => {
+                    let info = sys::Cobalt_WindowSystemInfoWayland {
+                        base: sys::Cobalt_WindowSystemInfoBase {
+                            type_: sys::Cobalt_WindowSystemType_Wayland,
+                        },
+                        display: display.as_ptr(),
+                    };
+                    sys::Cobalt_Renderer_Initialize(
+                        renderer,
+                        (&raw const info) as *const sys::Cobalt_WindowSystemInfoBase,
+                        init_flags.bits() as sys::Cobalt_RendererInitializationFlags,
+                    )
+                }
+                #[cfg(target_os = "linux")]
+                WindowSystemInternal::Xcb { connection } => {
+                    let info = sys::Cobalt_WindowSystemInfoXCB {
+                        base: sys::Cobalt_WindowSystemInfoBase {
+                            type_: sys::Cobalt_WindowSystemType_XCB,
+                        },
+                        connection: connection.as_ptr(),
+                    };
+                    sys::Cobalt_Renderer_Initialize(
+                        renderer,
+                        (&raw const info) as *const sys::Cobalt_WindowSystemInfoBase,
+                        init_flags.bits() as sys::Cobalt_RendererInitializationFlags,
+                    )
+                }
+                #[cfg(target_os = "linux")]
+                WindowSystemInternal::Xlib { display } => {
+                    let info = sys::Cobalt_WindowSystemInfoXlib {
+                        base: sys::Cobalt_WindowSystemInfoBase {
+                            type_: sys::Cobalt_WindowSystemType_Xlib,
+                        },
+                        display: display.as_ptr(),
+                    };
+                    sys::Cobalt_Renderer_Initialize(
+                        renderer,
+                        (&raw const info) as *const sys::Cobalt_WindowSystemInfoBase,
+                        init_flags.bits() as sys::Cobalt_RendererInitializationFlags,
+                    )
+                }
+            };
+            if result != sys::COBALT_SUCCESS {
+                sys::Cobalt_Renderer_Delete(renderer);
+                return Err(RendererError::new(RendererErrorKind::RendererError));
+            }
+        }
+
+        Ok(Renderer::new(renderer, self.enumerator.plugin.clone()))
+    }
+}
+
+unsafe impl<'a> Send for GraphicsDevice<'a> {}
+unsafe impl<'a> Sync for GraphicsDevice<'a> {}

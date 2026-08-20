@@ -1,0 +1,433 @@
+// Copyright (c) 2026, Maptek Pty Ltd
+// Licensed under the MIT License
+use bitflags::bitflags;
+use std::sync::Arc;
+
+use super::TexelArrayOutput;
+use super::{PerformanceHint, PersistenceFlags};
+use crate::RendererResult;
+use crate::renderer::RendererInternal;
+use crate::resources::batching::TransferBatch;
+
+use cobalt_renderer_sys as sys;
+
+const fn equivalent_image_formats(source_format: SourceImageFormat, format: ImageFormat) -> bool {
+    match source_format {
+        SourceImageFormat::R | SourceImageFormat::X => {
+            matches!(format, ImageFormat::R | ImageFormat::X)
+        }
+        SourceImageFormat::RG | SourceImageFormat::XY => {
+            matches!(format, ImageFormat::RG | ImageFormat::XY)
+        }
+        SourceImageFormat::RGBA | SourceImageFormat::XYZW => {
+            matches!(format, ImageFormat::RGBA | ImageFormat::XYZW)
+        }
+    }
+}
+
+const fn equivalent_data_formats(source_format: SourceDataFormat, format: DataFormat) -> bool {
+    match source_format {
+        SourceDataFormat::Int8 => matches!(format, DataFormat::Int8),
+        SourceDataFormat::Int16 => matches!(format, DataFormat::Int16),
+        SourceDataFormat::Int32 => matches!(format, DataFormat::Int32),
+        SourceDataFormat::UNorm8 | SourceDataFormat::UInt8 => {
+            matches!(format, DataFormat::UInt8 | DataFormat::UNorm8)
+        }
+        SourceDataFormat::UNorm16 | SourceDataFormat::UInt16 => {
+            matches!(format, DataFormat::UInt16)
+        }
+        SourceDataFormat::UInt32 => matches!(format, DataFormat::UInt32),
+        SourceDataFormat::Norm8 => matches!(format, DataFormat::Norm8),
+        SourceDataFormat::Float16 => matches!(format, DataFormat::Float16),
+        SourceDataFormat::Float32 => matches!(format, DataFormat::Float32),
+        _ => false,
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageFormat {
+    R = sys::Cobalt_TexelArrayImageFormat_R as u32,
+    RG = sys::Cobalt_TexelArrayImageFormat_RG as u32,
+    RGBA = sys::Cobalt_TexelArrayImageFormat_RGBA as u32,
+    X = sys::Cobalt_TexelArrayImageFormat_X as u32,
+    XY = sys::Cobalt_TexelArrayImageFormat_XY as u32,
+    XYZW = sys::Cobalt_TexelArrayImageFormat_XYZW as u32,
+}
+
+impl From<sys::Cobalt_TexelArrayImageFormat> for ImageFormat {
+    fn from(value: sys::Cobalt_TexelArrayImageFormat) -> Self {
+        match value {
+            sys::Cobalt_TexelArrayImageFormat_R => Self::R,
+            sys::Cobalt_TexelArrayImageFormat_RG => Self::RG,
+            sys::Cobalt_TexelArrayImageFormat_RGBA => Self::RGBA,
+            sys::Cobalt_TexelArrayImageFormat_X => Self::X,
+            sys::Cobalt_TexelArrayImageFormat_XY => Self::XY,
+            sys::Cobalt_TexelArrayImageFormat_XYZW => Self::XYZW,
+            v => panic!("Encountered unknown ImageFormat value '{v}'"),
+        }
+    }
+}
+
+impl ImageFormat {
+    pub const fn element_count_per_pixel(&self) -> usize {
+        match self {
+            Self::R | Self::X => 1,
+            Self::RG | Self::XY => 2,
+            Self::RGBA | Self::XYZW => 4,
+        }
+    }
+
+    pub const fn binary_equivalent_to_source(&self, format: SourceImageFormat) -> bool {
+        equivalent_image_formats(format, *self)
+    }
+
+    pub const fn binary_equivalent_to(&self, format: ImageFormat) -> bool {
+        match self {
+            Self::R | Self::X => matches!(format, ImageFormat::R | ImageFormat::X),
+            Self::RG | Self::XY => matches!(format, ImageFormat::RG | ImageFormat::XY),
+            Self::RGBA | Self::XYZW => matches!(format, ImageFormat::RGBA | ImageFormat::XYZW),
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataFormat {
+    Int8 = sys::Cobalt_TexelArrayDataFormat_Int8 as u32,
+    Int16 = sys::Cobalt_TexelArrayDataFormat_Int16 as u32,
+    Int32 = sys::Cobalt_TexelArrayDataFormat_Int32 as u32,
+    UInt8 = sys::Cobalt_TexelArrayDataFormat_UInt8 as u32,
+    UInt16 = sys::Cobalt_TexelArrayDataFormat_UInt16 as u32,
+    UInt32 = sys::Cobalt_TexelArrayDataFormat_UInt32 as u32,
+    Norm8 = sys::Cobalt_TexelArrayDataFormat_Norm8 as u32,
+    UNorm8 = sys::Cobalt_TexelArrayDataFormat_UNorm8 as u32,
+    Float16 = sys::Cobalt_TexelArrayDataFormat_Float16 as u32,
+    Float32 = sys::Cobalt_TexelArrayDataFormat_Float32 as u32,
+}
+
+impl From<sys::Cobalt_TexelArrayDataFormat> for DataFormat {
+    fn from(value: sys::Cobalt_TexelArrayDataFormat) -> Self {
+        match value {
+            sys::Cobalt_TexelArrayDataFormat_Int8 => Self::Int8,
+            sys::Cobalt_TexelArrayDataFormat_Int16 => Self::Int16,
+            sys::Cobalt_TexelArrayDataFormat_Int32 => Self::Int32,
+            sys::Cobalt_TexelArrayDataFormat_UInt8 => Self::UInt8,
+            sys::Cobalt_TexelArrayDataFormat_UInt16 => Self::UInt16,
+            sys::Cobalt_TexelArrayDataFormat_UInt32 => Self::UInt32,
+            sys::Cobalt_TexelArrayDataFormat_Norm8 => Self::Norm8,
+            sys::Cobalt_TexelArrayDataFormat_UNorm8 => Self::UNorm8,
+            sys::Cobalt_TexelArrayDataFormat_Float16 => Self::Float16,
+            sys::Cobalt_TexelArrayDataFormat_Float32 => Self::Float32,
+            v => panic!("Encountered unknown DataFormat value '{v}'"),
+        }
+    }
+}
+
+impl DataFormat {
+    pub const fn bytes_per_element(&self) -> usize {
+        match self {
+            Self::Int8 | Self::UInt8 | Self::Norm8 | Self::UNorm8 => 1,
+            Self::Int16 | Self::UInt16 | Self::Float16 => 2,
+            Self::Int32 | Self::UInt32 | Self::Float32 => 4,
+        }
+    }
+
+    pub const fn binary_equivalent_to_source(&self, format: SourceDataFormat) -> bool {
+        equivalent_data_formats(format, *self)
+    }
+
+    pub const fn binary_equivalent_to(&self, format: DataFormat) -> bool {
+        match self {
+            Self::UInt8 | Self::UNorm8 => matches!(format, DataFormat::UInt8 | DataFormat::UNorm8),
+            // NOTE(DTM): Eq is not const so we can't do a direct comparison, so cast down to i32 to compare
+            // Maybe in future it will be and we can compare directly
+            // (https://stackoverflow.com/questions/60125657/rust-cant-use-enum-in-const-fn)
+            f => (*f as u32) == (format as u32),
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceImageFormat {
+    R = sys::Cobalt_TexelArraySourceImageFormat_R as u32,
+    RG = sys::Cobalt_TexelArraySourceImageFormat_RG as u32,
+    RGBA = sys::Cobalt_TexelArraySourceImageFormat_RGBA as u32,
+    X = sys::Cobalt_TexelArraySourceImageFormat_X as u32,
+    XY = sys::Cobalt_TexelArraySourceImageFormat_XY as u32,
+    XYZW = sys::Cobalt_TexelArraySourceImageFormat_XYZW as u32,
+}
+
+impl From<sys::Cobalt_TexelArraySourceImageFormat> for SourceImageFormat {
+    fn from(value: sys::Cobalt_TexelArraySourceImageFormat) -> Self {
+        match value {
+            sys::Cobalt_TexelArraySourceImageFormat_R => Self::R,
+            sys::Cobalt_TexelArraySourceImageFormat_RG => Self::RG,
+            sys::Cobalt_TexelArraySourceImageFormat_RGBA => Self::RGBA,
+            sys::Cobalt_TexelArraySourceImageFormat_X => Self::X,
+            sys::Cobalt_TexelArraySourceImageFormat_XY => Self::XY,
+            sys::Cobalt_TexelArraySourceImageFormat_XYZW => Self::XYZW,
+            v => panic!("Encountered unknown SourceImageFormat value '{v}'"),
+        }
+    }
+}
+
+impl SourceImageFormat {
+    pub const fn element_count_per_pixel(&self) -> usize {
+        match self {
+            Self::R | Self::X => 1,
+            Self::RG | Self::XY => 2,
+            Self::RGBA | Self::XYZW => 4,
+        }
+    }
+
+    pub const fn binary_equivalent_to(&self, format: ImageFormat) -> bool {
+        equivalent_image_formats(*self, format)
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceDataFormat {
+    Int8 = sys::Cobalt_TexelArraySourceDataFormat_Int8 as u32,
+    Int16 = sys::Cobalt_TexelArraySourceDataFormat_Int16 as u32,
+    Int32 = sys::Cobalt_TexelArraySourceDataFormat_Int32 as u32,
+    UInt8 = sys::Cobalt_TexelArraySourceDataFormat_UInt8 as u32,
+    UInt16 = sys::Cobalt_TexelArraySourceDataFormat_UInt16 as u32,
+    UInt32 = sys::Cobalt_TexelArraySourceDataFormat_UInt32 as u32,
+    Norm8 = sys::Cobalt_TexelArraySourceDataFormat_Norm8 as u32,
+    Norm16 = sys::Cobalt_TexelArraySourceDataFormat_Norm16 as u32,
+    Norm32 = sys::Cobalt_TexelArraySourceDataFormat_Norm32 as u32,
+    UNorm8 = sys::Cobalt_TexelArraySourceDataFormat_UNorm8 as u32,
+    UNorm16 = sys::Cobalt_TexelArraySourceDataFormat_UNorm16 as u32,
+    UNorm32 = sys::Cobalt_TexelArraySourceDataFormat_UNorm32 as u32,
+    Float16 = sys::Cobalt_TexelArraySourceDataFormat_Float16 as u32,
+    Float32 = sys::Cobalt_TexelArraySourceDataFormat_Float32 as u32,
+}
+
+impl From<sys::Cobalt_TexelArraySourceDataFormat> for SourceDataFormat {
+    fn from(value: sys::Cobalt_TexelArraySourceDataFormat) -> Self {
+        match value {
+            sys::Cobalt_TexelArraySourceDataFormat_Int8 => Self::Int8,
+            sys::Cobalt_TexelArraySourceDataFormat_Int16 => Self::Int16,
+            sys::Cobalt_TexelArraySourceDataFormat_Int32 => Self::Int32,
+            sys::Cobalt_TexelArraySourceDataFormat_UInt8 => Self::UInt8,
+            sys::Cobalt_TexelArraySourceDataFormat_UInt16 => Self::UInt16,
+            sys::Cobalt_TexelArraySourceDataFormat_UInt32 => Self::UInt32,
+            sys::Cobalt_TexelArraySourceDataFormat_Norm8 => Self::Norm8,
+            sys::Cobalt_TexelArraySourceDataFormat_Norm16 => Self::Norm16,
+            sys::Cobalt_TexelArraySourceDataFormat_Norm32 => Self::Norm32,
+            sys::Cobalt_TexelArraySourceDataFormat_UNorm8 => Self::UNorm8,
+            sys::Cobalt_TexelArraySourceDataFormat_UNorm16 => Self::UNorm16,
+            sys::Cobalt_TexelArraySourceDataFormat_UNorm32 => Self::UNorm32,
+            sys::Cobalt_TexelArraySourceDataFormat_Float16 => Self::Float16,
+            sys::Cobalt_TexelArraySourceDataFormat_Float32 => Self::Float32,
+            v => panic!("Encountered unknown SourceDataFormat value '{v}'"),
+        }
+    }
+}
+
+impl SourceDataFormat {
+    pub const fn bytes_per_element(&self) -> usize {
+        match self {
+            Self::Int8 | Self::UInt8 | Self::Norm8 | Self::UNorm8 => 1,
+            Self::Int16 | Self::UInt16 | Self::Norm16 | Self::UNorm16 | Self::Float16 => 2,
+            Self::Int32 | Self::UInt32 | Self::Norm32 | Self::UNorm32 | Self::Float32 => 4,
+        }
+    }
+
+    pub const fn binary_equivalent_to(&self, format: DataFormat) -> bool {
+        equivalent_data_formats(*self, format)
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct TexelArrayUsageFlags : u32 {
+        const Default = sys::Cobalt_TexelArrayUsageFlags_Default as u32;
+        const ShaderInput = sys::Cobalt_TexelArrayUsageFlags_ShaderInput as u32;
+        const ShaderOutput = sys::Cobalt_TexelArrayUsageFlags_ShaderOutput as u32;
+        const TransferSource = sys::Cobalt_TexelArrayUsageFlags_TransferSource as u32;
+        const TransferDestination = sys::Cobalt_TexelArrayUsageFlags_TransferDestination as u32;
+    }
+}
+
+pub struct UnallocatedTexelArray<'a> {
+    texel_array: TexelArray,
+    _initial_data: std::marker::PhantomData<&'a i32>,
+}
+
+impl<'a> UnallocatedTexelArray<'a> {
+    pub(crate) fn new(
+        handle: sys::Cobalt_TexelArray,
+        renderer_internal: Arc<RendererInternal>,
+    ) -> Self {
+        UnallocatedTexelArray {
+            texel_array: TexelArray::new(handle, renderer_internal),
+            _initial_data: std::marker::PhantomData,
+        }
+    }
+
+    pub fn set_buffer_layout(
+        &mut self,
+        image_format: ImageFormat,
+        data_format: DataFormat,
+        entry_count: usize,
+    ) {
+        unsafe {
+            sys::Cobalt_TexelArray_SetBufferLayout(
+                self.texel_array.handle,
+                image_format as sys::Cobalt_TexelArrayImageFormat,
+                data_format as sys::Cobalt_TexelArrayDataFormat,
+                entry_count,
+            )
+        }
+    }
+
+    pub fn set_usage_flags(&mut self, usage_flags: TexelArrayUsageFlags) {
+        unsafe {
+            sys::Cobalt_TexelArray_SetUsageFlags(
+                self.texel_array.handle,
+                usage_flags.bits() as sys::Cobalt_TexelArrayUsageFlags,
+            )
+        }
+    }
+
+    pub fn set_initial_data<S: Sized>(
+        &mut self,
+        source_buffer: &'a [S],
+        image_format: SourceImageFormat,
+        data_format: SourceDataFormat,
+    ) -> RendererResult<()> {
+        unsafe {
+            return_on_failure!(sys::Cobalt_TexelArray_SetInitialData(
+                self.texel_array.handle,
+                source_buffer.as_ptr() as *const std::ffi::c_void,
+                core::mem::size_of_val(source_buffer),
+                image_format as sys::Cobalt_TexelArraySourceImageFormat,
+                data_format as sys::Cobalt_TexelArraySourceDataFormat,
+            ))
+        }
+        Ok(())
+    }
+
+    pub fn set_performance_hints(
+        &mut self,
+        performance_hint_cpu: PerformanceHint,
+        performance_hint_gpu: PerformanceHint,
+    ) {
+        unsafe {
+            sys::Cobalt_ResourceArray_SetPerformanceHints(
+                self.texel_array.handle as sys::Cobalt_ResourceArray,
+                performance_hint_cpu.bits() as sys::Cobalt_ResourceArrayPerformanceHint,
+                performance_hint_gpu.bits() as sys::Cobalt_ResourceArrayPerformanceHint,
+            )
+        }
+    }
+
+    pub fn set_data_persistence_flags(&mut self, data_persistence_flags: PersistenceFlags) {
+        unsafe {
+            sys::Cobalt_ResourceArray_SetDataPersistenceFlags(
+                self.texel_array.handle as sys::Cobalt_ResourceArray,
+                data_persistence_flags.bits() as sys::Cobalt_ResourceArrayDataPersistenceFlags,
+            )
+        }
+    }
+
+    pub fn allocate_memory(self) -> RendererResult<TexelArray> {
+        unsafe {
+            return_on_failure!(sys::Cobalt_TexelArray_AllocateMemory(
+                self.texel_array.handle
+            ))
+        }
+        Ok(self.texel_array)
+    }
+}
+
+pub struct TexelArray {
+    pub(crate) handle: sys::Cobalt_TexelArray,
+    _renderer: Arc<RendererInternal>,
+}
+
+impl TexelArray {
+    pub(crate) fn new(
+        handle: sys::Cobalt_TexelArray,
+        renderer_internal: Arc<RendererInternal>,
+    ) -> Self {
+        TexelArray {
+            handle,
+            _renderer: renderer_internal,
+        }
+    }
+
+    pub fn queue_data_update<S: Sized>(
+        &mut self,
+        source_buffer: &[S],
+        image_format: SourceImageFormat,
+        data_format: SourceDataFormat,
+        target_buffer_offset: usize,
+        transfer_batch: Option<&TransferBatch>,
+    ) -> RendererResult<()> {
+        let batch = match transfer_batch {
+            None => std::ptr::null_mut(),
+            Some(b) => b.handle,
+        };
+        unsafe {
+            return_on_failure!(sys::Cobalt_TexelArray_QueueDataUpdate(
+                self.handle,
+                source_buffer.as_ptr() as *const std::ffi::c_void,
+                core::mem::size_of_val(source_buffer),
+                image_format as sys::Cobalt_TexelArraySourceImageFormat,
+                data_format as sys::Cobalt_TexelArraySourceDataFormat,
+                target_buffer_offset,
+                batch,
+            ))
+        }
+        Ok(())
+    }
+
+    pub fn queue_data_transfer(
+        &mut self,
+        target_buffer: &mut TexelArray,
+        transfer_count: usize,
+        source_buffer_offset: usize,
+        target_buffer_offset: usize,
+        transfer_batch: Option<&TransferBatch>,
+    ) -> RendererResult<()> {
+        let batch = match transfer_batch {
+            None => std::ptr::null_mut(),
+            Some(b) => b.handle,
+        };
+        unsafe {
+            return_on_failure!(sys::Cobalt_TexelArray_QueueDataTransfer(
+                self.handle,
+                target_buffer.handle,
+                transfer_count,
+                source_buffer_offset,
+                target_buffer_offset,
+                batch,
+            ))
+        }
+        Ok(())
+    }
+
+    pub fn add_output_capture_target(&mut self, output: &mut TexelArrayOutput) {
+        unsafe { sys::Cobalt_TexelArray_AddOutputCaptureTarget(self.handle, output.handle) }
+    }
+
+    pub fn remove_output_capture_target(&mut self, output: &mut TexelArrayOutput) {
+        unsafe { sys::Cobalt_TexelArray_RemoveOutputCaptureTarget(self.handle, output.handle) }
+    }
+}
+
+impl Drop for TexelArray {
+    fn drop(&mut self) {
+        unsafe {
+            sys::Cobalt_TexelArray_Delete(self.handle);
+        }
+    }
+}
+
+unsafe impl Send for TexelArray {}
+unsafe impl Sync for TexelArray {}
