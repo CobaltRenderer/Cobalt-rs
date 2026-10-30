@@ -37,13 +37,10 @@ impl TransferBatch {
         }
     }
 
-    // NOTE(DTM): Bug in 2.0.0, SubmitBatch returns u8 instead of u32,
-    // cast should be removed in future versions when this is fixed and
-    // a warning is raised
     #[warn(clippy::unnecessary_cast)]
     pub fn submit_batch(&self) -> RendererResult<()> {
         unsafe {
-            let result = sys::Cobalt_TransferBatch_SubmitBatch(self.handle) as i32;
+            let result = sys::Cobalt_TransferBatch_SubmitBatch(self.handle);
             return_on_failure!(result);
         }
         Ok(())

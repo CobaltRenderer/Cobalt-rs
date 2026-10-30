@@ -48,7 +48,7 @@ This crate also support downloading releases automatically with the optional `do
 
 ```toml
 [dependencies]
-cobalt_renderer = { version = "0.1.0", features = ["download_sdk"] }
+cobalt_renderer = { version = "0.1.1", features = ["download_sdk"] }
 ```
 
 You should also set the `COBALT_SDK_CACHE_DIR` environment variable in your projects `.cargo/config.toml` to save the SDK outside the `target` directory and preserve it when `cargo clean` is run.
