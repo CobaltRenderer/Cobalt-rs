@@ -3,7 +3,7 @@
 
 [package]
 name = "cobalt_renderer"
-version = "0.1.0"
+version = "0.1.1"
 rust-version = "1.88.0"
 edition = "2024"
 description = "Cross-platform graphics library, making 3D graphics hardware simpler to use"
@@ -22,7 +22,7 @@ generate_bindings = ["cobalt_renderer_sys/generate_bindings"]
 raw_window_handle = ["dep:raw-window-handle"]
 
 [dependencies]
-cobalt_renderer_sys = { version = "2.0.0", path="../cobalt_renderer_sys" }
+cobalt_renderer_sys = { version = "2.0.1", path="../cobalt_renderer_sys" }
 bitflags = "2.4.1"
 parking_lot = "0.12.1"
 log = "0.4"

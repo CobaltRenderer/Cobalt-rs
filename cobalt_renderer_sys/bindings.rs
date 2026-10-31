@@ -2,7 +2,7 @@
 
 pub const COBALT_RENDERER_API_VERSION_MAJOR: u32 = 2;
 pub const COBALT_RENDERER_API_VERSION_MINOR: u32 = 0;
-pub const COBALT_RENDERER_API_VERSION_PATCH: u32 = 0;
+pub const COBALT_RENDERER_API_VERSION_PATCH: u32 = 1;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Cobalt_ResourceArray_Internal {
@@ -59,7 +59,7 @@ pub const Cobalt_EndTiming_BeforeNextFrame: Cobalt_EndTiming = 0;
 pub const Cobalt_EndTiming_AnyFrame: Cobalt_EndTiming = 1;
 pub type Cobalt_EndTiming = ::std::os::raw::c_uint;
 unsafe extern "C" {
-    pub fn Cobalt_TransferBatch_SubmitBatch(batch: Cobalt_TransferBatch) -> ::std::os::raw::c_char;
+    pub fn Cobalt_TransferBatch_SubmitBatch(batch: Cobalt_TransferBatch) -> Cobalt_Result;
 }
 unsafe extern "C" {
     pub fn Cobalt_TransferBatch_IsSubmitted(batch: Cobalt_TransferBatch) -> ::std::os::raw::c_char;

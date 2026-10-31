@@ -20,35 +20,35 @@ const SDK_DOWNLOADS: [(&str, SdkDownload); 4] = [
     (
         "macos-clang-arm64",
         SdkDownload {
-            download_url: "https://github.com/CobaltRenderer/Cobalt/releases/download/v2.0.0/CobaltRenderer-SDK-macos-clang-arm64-v2.0.0.zip",
-            hash: "f0db7acd3f7a1f27336861c4b223ad407a39b3040f75a87b14147274990f2b7f",
+            download_url: "https://github.com/CobaltRenderer/Cobalt/releases/download/v2.0.1/CobaltRenderer-SDK-macos-clang-arm64-v2.0.1.zip",
+            hash: "9ee3d7f7b78accf8bdeae5e4e35c71ba1e6605a623500518e18f647e7dbc57df",
         },
     ),
     (
         "ubuntu-gcc-arm64",
         SdkDownload {
-            download_url: "https://github.com/CobaltRenderer/Cobalt/releases/download/v2.0.0/CobaltRenderer-SDK-ubuntu-gcc-arm64-v2.0.0.zip",
-            hash: "edbdf33c0c643cd0471d6e223c706db7971a5cf61a93a43f07a26643df8cfa7f",
+            download_url: "https://github.com/CobaltRenderer/Cobalt/releases/download/v2.0.1/CobaltRenderer-SDK-ubuntu-gcc-arm64-v2.0.1.zip",
+            hash: "fc161ca3175729f4464141b3cb908d954609cec64790edfdee1e9c0a2a016349",
         },
     ),
     (
         "ubuntu-gcc-x64",
         SdkDownload {
-            download_url: "https://github.com/CobaltRenderer/Cobalt/releases/download/v2.0.0/CobaltRenderer-SDK-ubuntu-gcc-x64-v2.0.0.zip",
-            hash: "5a3094d37bd6924f0e84aecdf9f81356c5c72cec3f0862f28e249592e207fb32",
+            download_url: "https://github.com/CobaltRenderer/Cobalt/releases/download/v2.0.1/CobaltRenderer-SDK-ubuntu-gcc-x64-v2.0.1.zip",
+            hash: "9a1b5a263d920aee64172e163ac3e5e19e74d00eca9779e63a221a2202c20b28",
         },
     ),
     (
         "windows-msvc-x64",
         SdkDownload {
-            download_url: "https://github.com/CobaltRenderer/Cobalt/releases/download/v2.0.0/CobaltRenderer-SDK-windows-msvc-x64-v2.0.0.zip",
-            hash: "2f9e0ce1bc8d52cfc2e3305024b701d78aba6fee39b37c90dc32851f7827041d",
+            download_url: "https://github.com/CobaltRenderer/Cobalt/releases/download/v2.0.1/CobaltRenderer-SDK-windows-msvc-x64-v2.0.1.zip",
+            hash: "748730950eeb936d032e1c4510d47f7aae279bac8bf92212d24d3eb3babff30a",
         },
     ),
 ];
 
 const SDK_GIT_REPO: &str = "https://github.com/CobaltRenderer/Cobalt.git";
-const SDK_GIT_HASH: &str = "935b820a90438424bf2349dfc222fe5e65743a4c";
+const SDK_GIT_HASH: &str = "7b9878529ef94507f931f4f5f601baee9b2b5345";
 
 fn assert_sdk_version(sdk_path: impl AsRef<Path>) {
     let sdk_path = sdk_path.as_ref();

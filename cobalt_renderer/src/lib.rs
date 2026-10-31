@@ -88,7 +88,7 @@
 //!
 //! The `cobalt_renderer_sys` crate version corresponds with the versioning of SDK releases.
 //! The major and minor versions must match and patch releases can differ. So for example,
-//! version 2.0.0 can use SDK version 2.0.0 or 2.0.1 (if it existed), but not version 2.1.0 or 3.0.0.
+//! version 2.0.0 can use SDK version 2.0.0 or 2.0.1, but not version 2.1.0 or 3.0.0.
 //!
 //! This crate version does not correspond with the SDK version required. Please check the version of
 //! the `cobalt_renderer_sys` dependency to know what SDK version is required.
